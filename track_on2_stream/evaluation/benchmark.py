@@ -6,10 +6,10 @@ import argparse
 import yaml
 from argparse import Namespace
 
-from utils.coord_utils import get_points_on_a_grid
-from utils.train_utils import load_args_from_yaml
-from model.trackon_predictor import Predictor
-from dataset.tapvid import TAPVid
+from ..utils.coord_utils import get_points_on_a_grid
+from ..utils.train_utils import load_args_from_yaml
+from ..model.trackon_predictor import Predictor
+from ..dataset.tapvid import TAPVid
 
 def get_args():
     parser = argparse.ArgumentParser(description="Benchmark script for Track-On2")

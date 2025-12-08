@@ -13,8 +13,8 @@ import torch.backends.cudnn as cudnn
 import yaml
 from argparse import Namespace
 
-from dataset.movi_f import Movi_F_Large
-from dataset.tapvid import TAPVid
+from ..dataset.movi_f import Movi_F_Large
+from ..dataset.tapvid import TAPVid
 from datetime import timedelta
 
 

@@ -20,9 +20,9 @@ import numpy as np
 import torch
 from torchvision.io import read_video
 
-from model.trackon_predictor import Predictor
-from utils.train_utils import load_args_from_yaml
-from utils.vis_utils import plot_tracks_wo_tail, save_video
+from track_on2_stream.model.trackon_predictor import Predictor
+from track_on2_stream.utils.train_utils import load_args_from_yaml
+from track_on2_stream.utils.vis_utils import plot_tracks_wo_tail, save_video
 
 
 def parse_args() -> argparse.Namespace:

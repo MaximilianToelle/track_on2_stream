@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-from utils.coord_utils import coords_to_indices, indices_to_coords
+from ..utils.coord_utils import coords_to_indices, indices_to_coords
 
 class Loss_Function(nn.Module):
     def __init__(self, args):

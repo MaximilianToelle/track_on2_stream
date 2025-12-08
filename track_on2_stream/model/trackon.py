@@ -7,12 +7,12 @@ import torch.nn.functional as F
 
 import torch
 
-from model.backbone import Backbone
-from model.modules import MHA_Block, SimpleFPN
-from model.prediction_head import Prediction_Head
-from model.reranking import Rerank_Module
+from .backbone import Backbone
+from .modules import MHA_Block, SimpleFPN
+from .prediction_head import Prediction_Head
+from .reranking import Rerank_Module
 
-from utils.coord_utils import indices_to_coords
+from ..utils.coord_utils import indices_to_coords
 
 class Track_On2(nn.Module):
     def __init__(self, args, nhead=4):
@@ -27,7 +27,7 @@ class Track_On2(nn.Module):
         # === === ===
 
         # === Size related ===
-        self.input_size = args.input_size
+        self.input_size = tuple(args.input_size)
         self.stride = 4
         self.H = self.input_size[0]         # Original image size
         self.W = self.input_size[1]

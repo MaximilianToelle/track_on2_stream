@@ -12,8 +12,8 @@ import cv2
 import imageio.v2 as imageio
 
 import argparse
-from utils.coord_utils import get_points_on_a_grid
-from utils.eval_utils import Evaluator, compute_tapvid_metrics
+from ..utils.coord_utils import get_points_on_a_grid
+from ..utils.eval_utils import Evaluator, compute_tapvid_metrics
 
 EPS = 1e-6
 

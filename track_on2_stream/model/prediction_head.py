@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-from model.modules import DMSMHA_Block
+from .modules import DMSMHA_Block
 
 class Prediction_Head(nn.Module):
     def __init__(self, args, nhead):

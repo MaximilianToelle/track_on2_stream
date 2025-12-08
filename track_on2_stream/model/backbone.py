@@ -26,14 +26,14 @@ class Backbone(nn.Module):
         arch_type = args.vit_backbone[7:]   # "s", "b", or "s_plus"
 
         if model_name == "dinov3":
-            from model.vit_adapter.dinov3_adapter.dinov3_vit_adapter import ViTAdapter
+            from .vit_adapter.dinov3_adapter.dinov3_vit_adapter import ViTAdapter
             self.vit_encoder = ViTAdapter(deform_num_heads=12 if arch_type == "b" else 6,
                                           with_cp=self.with_cp,
                                           vit_upsample_factor=self.vit_upsample_factor,
                                           arch_type=arch_type)
             
         else:
-            from model.vit_adapter.dinov2_adapter.dinov2_vit_adapter import ViTAdapter
+            from .vit_adapter.dinov2_adapter.dinov2_vit_adapter import ViTAdapter
             self.vit_encoder = ViTAdapter(deform_num_heads=12 if arch_type == "b" else 6,
                                           with_cp=self.with_cp,
                                           vit_upsample_factor=self.vit_upsample_factor,

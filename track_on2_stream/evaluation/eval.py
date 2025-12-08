@@ -5,8 +5,8 @@ import argparse
 import yaml
 from argparse import Namespace
 
-from model.trackon_predictor import Predictor
-from utils.train_utils import load_args_from_yaml, fix_random_seeds
+from ..model.trackon_predictor import Predictor
+from ..utils.train_utils import load_args_from_yaml, fix_random_seeds
 
 
 def get_args():

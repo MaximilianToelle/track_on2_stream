@@ -13,7 +13,7 @@ from functools import partial
 from mmcv.ops import MultiScaleDeformableAttention
 
 
-from model.vit_adapter.dinov2_adapter.dinov2_adapter_modules import (
+from .dinov2_adapter_modules import (
     InteractionBlockWithCls,
     SpatialPriorModule,
     deform_inputs,

@@ -10,7 +10,7 @@ from transformers import AutoModel
 from functools import partial
 from mmcv.ops import MultiScaleDeformableAttention
 
-from model.vit_adapter.dinov3_adapter.dinov3_adapter_modules import (
+from .dinov3_adapter_modules import (
     InteractionBlockWithCls,
     SpatialPriorModule,
     deform_inputs,

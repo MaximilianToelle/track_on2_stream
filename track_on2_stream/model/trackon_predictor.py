@@ -1,6 +1,6 @@
 import torch
-from model.trackon import Track_On2
-from evaluation.evaluator import get_points_on_a_grid  # adjust import if needed
+from .trackon import Track_On2
+from ..evaluation.evaluator import get_points_on_a_grid  # adjust import if needed
 from collections import OrderedDict
 
 ALLOWED_MISSING_PREFIXES = (

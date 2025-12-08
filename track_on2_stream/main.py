@@ -19,19 +19,19 @@ from pathlib import Path
 
 import argparse
 
-from utils.train_utils import init_distributed_mode, fix_random_seeds
-from utils.train_utils import get_dataloaders, get_scheduler
-from utils.train_utils import restart_from_checkpoint, save_on_master
-from utils.train_utils import load_args_from_yaml
+from .utils.train_utils import init_distributed_mode, fix_random_seeds
+from .utils.train_utils import get_dataloaders, get_scheduler
+from .utils.train_utils import restart_from_checkpoint, save_on_master
+from .utils.train_utils import load_args_from_yaml
 
-from utils.log_utils import init_wandb, Loss_Tracker
+from .utils.log_utils import init_wandb, Loss_Tracker
 
-from utils.coord_utils import get_queries, get_points_on_a_grid
+from .utils.coord_utils import get_queries, get_points_on_a_grid
 
-from utils.eval_utils import Evaluator, compute_tapvid_metrics
+from .utils.eval_utils import Evaluator, compute_tapvid_metrics
 
-from model.trackon import Track_On2
-from model.loss import Loss_Function
+from .model.trackon import Track_On2
+from .model.loss import Loss_Function
 
 
 def train(args, train_dataloader, model, optimizer, lr_scheduler, scaler, loss_tracker):
