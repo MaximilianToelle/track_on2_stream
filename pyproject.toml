@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "track_on2_stream"
+version = "0.1.0"
+description = "Modifications of TrackOn2 to work with online video stream and new queries"
+readme = "README.md"
+authors = [{name = "Maximilian Tölle"}]
+license = {file = "LICENSE"}
+dependencies = []
+
+[tool.setuptools.packages]
+find = {include = ["track_on2_stream*"]}
+
+[tool.setuptools.package-data]
+"track_on2_stream.conf" = ["*.yaml"]
