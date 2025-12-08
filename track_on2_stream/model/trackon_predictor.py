@@ -73,10 +73,11 @@ class Predictor(torch.nn.Module):
     @torch.no_grad()
     def forward(self, video, queries=None):
         """
-        video: Tensor of shape (1, 3, T, H, W)
+        video: Tensor of shape (1, T, 3, H, W)
         queries: Tensor of shape (1, N, 3), where each query is (t, x, y), in pixel coordinates
         """
-        B, C, T, H, W = video.shape
+        
+        B, T, C, H, W = video.shape
         device = video.device
 
         # Add extra queries from uniform grid if none provided
