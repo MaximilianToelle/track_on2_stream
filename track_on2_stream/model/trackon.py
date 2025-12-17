@@ -547,25 +547,7 @@ class Track_On2(nn.Module):
             torch.argmax(c2.detach(), dim=-1).unsqueeze(1),
             self.input_size, 
             self.stride
-        ).squeeze(1)
-
-        # === Soft-Argmax (GPU-resident, no sync) ===
-        # Convert correlation scores to probability distribution
-        # c2_probs = torch.softmax(c2, dim=-1)  # (B, N, P)
-        
-        # # # Precompute patch coordinate grid on first call
-        # if not hasattr(self, '_patch_coords_cache'):
-        #     Hf, Wf = self.Hf, self.Wf
-        #     y_coords = torch.arange(Hf, device=c2.device, dtype=c2.dtype) * self.stride + 0.5 * self.stride
-        #     x_coords = torch.arange(Wf, device=c2.device, dtype=c2.dtype) * self.stride + 0.5 * self.stride
-        #     yy, xx = torch.meshgrid(y_coords, x_coords, indexing='ij')
-        #     patch_coords = torch.stack([xx, yy], dim=-1).view(-1, 2)  # (P, 2)
-        #     self.register_buffer('_patch_coords_cache', patch_coords, persistent=False)
-        
-        # patch_coords = self._patch_coords_cache
-        
-        # # # Weighted average of patch coordinates: (B, N, P) × (P, 2) → (B, N, 2)
-        # p_patch = torch.einsum('bnp,p...->bn...', c2_probs, patch_coords)  # (B, N, 2)      
+        ).squeeze(1)     
 
         # === Vectorized Prediction Head ===
         o, v_logit, u_logit = self.prediction_head(q_t, f4, f8, f16, f32, p_patch)      # (Layers, B, N, 2), (B, N), (B, N)

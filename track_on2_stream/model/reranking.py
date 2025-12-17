@@ -81,7 +81,7 @@ class Rerank_Module(nn.Module):
         _, P, D = f4.shape
         K = self.K
         device = q_t.device
-        assert P == self.P, f"Expected P to be {self.P}, but got {P}"
+        # assert P == self.P, f"Expected P to be {self.P}, but got {P}"
 
         # === Top-k Indices ===
         top_k_indices = torch.topk(c_t, K, dim=-1)[1]                             # (B, N_t, K)

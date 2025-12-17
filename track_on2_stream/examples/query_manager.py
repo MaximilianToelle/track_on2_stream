@@ -215,4 +215,4 @@ class QueryManager:
         
         self.padded_queries[destination_indices] = sampled_coords[src_mask]
 
-        # TODO: Filter wrt to overlapping view coordinates  
+        # TODO: Project into 3D and filter wrt to overlapping view coordinates

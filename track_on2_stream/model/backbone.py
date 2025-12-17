@@ -42,6 +42,7 @@ class Backbone(nn.Module):
         self.adapter_dim = self.vit_encoder.embed_dim
 
         # modulelist
+        # TODO: replace with nn.Conv2d with 1x1 kernel to get rid of all costly permute and reshape but weights need to be remapped
         self.projections = nn.ModuleList([
             nn.Sequential(nn.Linear(self.adapter_dim, self.D)),
             nn.Sequential(nn.Linear(self.adapter_dim, self.D)),
@@ -50,7 +51,6 @@ class Backbone(nn.Module):
         ])
 
         # === Positional embedding ===
-
         self.H = self.size[0]
         self.W = self.size[1]
         self.Hf = self.H // self.stride

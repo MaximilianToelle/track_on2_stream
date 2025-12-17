@@ -37,16 +37,13 @@ class MHA_Block(nn.Module):
         # B, N, C = q.shape
         # _, P, _ = k.shape
 
-        # if mask is not None:
-        #     assert mask.shape == (B, P), f"Mask shape: {mask.shape} expected {(B, P)}"
-        #     full_mask = mask.all(dim=1)  # (B,)
-
         q_orig = q
         attn_out, _ = self.mha(q, k, v, key_padding_mask=mask, need_weights=False)
 
         drop = self.dropout1(attn_out)
 
         if mask is not None:
+            # assert mask.shape == (B, P), f"Mask shape: {mask.shape} expected {(B, P)}"
             full_mask = mask.all(dim=1, keepdim=True).unsqueeze(-1)     # (B, 1, 1)
             # (~full_mask) gives 0 for masked batches, 1 for valid ones
             drop = drop * (~full_mask).to(drop.dtype)
@@ -57,7 +54,6 @@ class MHA_Block(nn.Module):
         ffn = self.linear2(self.dropout(self.act(self.linear1(q))))
         q = q + self.dropout2(ffn)
         q = self.norm2(q)
-
 
         return q
     
