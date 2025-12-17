@@ -34,20 +34,22 @@ class MHA_Block(nn.Module):
 
     def forward(self, q, k, v, mask=None):
         # q, k, v: (B, T, C), mask: (B, P), where True = ignore
-        B, N, C = q.shape
-        _, P, _ = k.shape
+        # B, N, C = q.shape
+        # _, P, _ = k.shape
 
-        if mask is not None:
-            assert mask.shape == (B, P), f"Mask shape: {mask.shape} expected {(B, P)}"
-            full_mask = mask.all(dim=1)  # (B,)
+        # if mask is not None:
+        #     assert mask.shape == (B, P), f"Mask shape: {mask.shape} expected {(B, P)}"
+        #     full_mask = mask.all(dim=1)  # (B,)
 
         q_orig = q
         attn_out, _ = self.mha(q, k, v, key_padding_mask=mask, need_weights=False)
 
         drop = self.dropout1(attn_out)
 
-        if mask is not None and full_mask.any():
-            drop[full_mask] = 0
+        if mask is not None:
+            full_mask = mask.all(dim=1, keepdim=True).unsqueeze(-1)     # (B, 1, 1)
+            # (~full_mask) gives 0 for masked batches, 1 for valid ones
+            drop = drop * (~full_mask).to(drop.dtype)
 
         q = q_orig + drop
         q = self.norm1(q)
@@ -95,9 +97,9 @@ class DMSMHA_Block(nn.Module):
         # :args start_levels: (num_level,)
         
 
-        B, N, C = q.shape
-        B, P, C = k.shape
-        device = q.device
+        # B, N, C = q.shape
+        # B, P, C = k.shape
+        # device = q.device
 
         q = q + self.dropout1(self.mha(q, k, v, reference_points=reference_points, spatial_shapes=spatial_shapes, level_start_index=start_levels))
         q = self.norm1(q)

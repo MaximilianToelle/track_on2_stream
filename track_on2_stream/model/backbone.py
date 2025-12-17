@@ -59,7 +59,13 @@ class Backbone(nn.Module):
 
         self.pos_embedding = nn.Parameter(torch.zeros(1, self.D, self.Hf, self.Wf))
         nn.init.trunc_normal_(self.pos_embedding, std=0.02)
-
+        
+        # NOTE: constant because image resolution does not change
+        self.register_buffer("pos4", self.pos_embedding, persistent=False)
+        self.register_buffer("pos8", F.interpolate(self.pos_embedding, scale_factor=0.5, mode='bilinear'), persistent=False)
+        self.register_buffer("pos16", F.interpolate(self.pos_embedding, scale_factor=0.25, mode='bilinear'), persistent=False)
+        self.register_buffer("pos32", F.interpolate(self.pos_embedding, scale_factor=0.125, mode='bilinear'), persistent=False)
+        
         # Register normalization constants as buffers
         for name, value in (("_resnet_mean", _RESNET_MEAN), ("_resnet_std", _RESNET_STD)):
             self.register_buffer(
@@ -88,23 +94,18 @@ class Backbone(nn.Module):
 
         B, T, _, H, W = video.shape
         D = self.D
-        assert H == self.H and W == self.W, f"Input video size {H}x{W} does not match the expected size {self.H}x{self.W}"
+        # assert H == self.H and W == self.W, f"Input video size {H}x{W} does not match the expected size {self.H}x{self.W}"
 
         video_flat = video.view(B * T, 3, H, W) # * 2 - 1.0                           # to [-1, 1]
         video_flat = (video_flat - self._resnet_mean) / self._resnet_std              # Normalize to [-1, 1] range
 
         # === Extract features ===
-        f4, f8, f16, f32 = self.vit_encoder(video_flat)               # (B * T, 384, H4, W4)
+        f4, f8, f16, f32 = self.vit_encoder(video_flat)                                  # (B * T, 384, H4, W4)
 
-        pos4 = self.pos_embedding                                                                               # (1, D, H4, W4)
-        pos8 = F.interpolate(self.pos_embedding, scale_factor=0.5, mode='bilinear', align_corners=False)        # (1, D, H8, W8)
-        pos16 = F.interpolate(self.pos_embedding, scale_factor=0.25, mode='bilinear', align_corners=False)      # (1, D, H16, W16)
-        pos32 = F.interpolate(self.pos_embedding, scale_factor=0.125, mode='bilinear', align_corners=False)     # (1, D, H32, W32)
-
-        f4 = self.project_feat(f4, idx=0) + pos4                                                 # (B * T, D, H4, W4)
-        f8 = self.project_feat(f8, idx=1) + pos8                                                 # (B * T, D, H8, W8)           
-        f16 = self.project_feat(f16, idx=2) + pos16                                              # (B * T, D, H16, W16)
-        f32 = self.project_feat(f32, idx=3) + pos32                                              # (B * T, D, H32, W32)
+        f4 = self.project_feat(f4, idx=0) + self.pos4                                    # (B * T, D, H4, W4)
+        f8 = self.project_feat(f8, idx=1) + self.pos8                                    # (B * T, D, H8, W8)           
+        f16 = self.project_feat(f16, idx=2) + self.pos16                                 # (B * T, D, H16, W16)
+        f32 = self.project_feat(f32, idx=3) + self.pos32                                 # (B * T, D, H32, W32)
         # === === ===
 
         # === Reshape & Permute ===

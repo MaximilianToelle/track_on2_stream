@@ -44,18 +44,18 @@ def indices_to_coords(indices, size, ps):
 
     num_columns = W // ps
 
-    
-    rows = indices // num_columns
+    rows = indices.div(num_columns, rounding_mode='floor')
     cols = indices % num_columns
     
-    y_coords = rows * ps + 0.5 * ps
-    x_coords = cols * ps + 0.5 * ps
+    offset = ps * 0.5
+    y_coords = rows.float() * ps + offset
+    x_coords = cols.float() * ps + offset
     
     coordinates = torch.stack((x_coords, y_coords), dim=-1)
 
-    assert coordinates.shape == (B, T, N, 2)
-    assert torch.all(coordinates[:, :, :, 0] <= W)
-    assert torch.all(coordinates[:, :, :, 1] <= H)
+    # assert coordinates.shape == (B, T, N, 2)
+    # assert torch.all(coordinates[:, :, :, 0] <= W)
+    # assert torch.all(coordinates[:, :, :, 1] <= H)
     
     return coordinates
 
@@ -177,5 +177,3 @@ def get_points_on_a_grid(size, extent, device):
         indexing="ij",
     )
     return torch.stack([grid_x, grid_y], dim=-1).reshape(1, -1, 2)
-
-
