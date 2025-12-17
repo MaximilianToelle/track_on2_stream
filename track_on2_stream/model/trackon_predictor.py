@@ -1,6 +1,7 @@
 import torch
 from .trackon import Track_On2
 from ..evaluation.evaluator import get_points_on_a_grid  # adjust import if needed
+from ..examples.query_manager import QueryManager
 from collections import OrderedDict
 
 ALLOWED_MISSING_PREFIXES = (
@@ -102,3 +103,86 @@ class Predictor(torch.nn.Module):
         pred_visibility = (out["V_logit"][:, :, :N].sigmoid() >= self.delta_v)  # (B, T, N)
 
         return pred_trajectory, pred_visibility
+    
+
+class StreamPredictor(Predictor):
+    def __init__(
+        self,
+        model_args, 
+        checkpoint_path=None,
+        support_grid_size=20,
+    ):
+        super().__init__(model_args, checkpoint_path, support_grid_size)
+        
+        self.first_forward = True
+
+    @torch.no_grad()
+    def forward(self, current_frame_batch, padded_new_queries, resampled_mask):
+        """
+        current_frame_batch: Tensor of shape (B, 3, H, W)
+        padded_new_queries: [B, N, 2], where each query is (x, y) in pixel coordinates
+        resampled_mask: [B, N] showing which queries to use from padded_new_queries  
+        """
+
+        if self.first_forward:
+            self.first_forward = False
+
+            self.N = padded_new_queries.shape[1]
+
+            if self.support_grid_size > 0:
+                self.B, _, self.H, self.W = current_frame_batch.shape
+                self.device = current_frame_batch.device
+
+                if resampled_mask.sum() != self.B*self.N:
+                    raise ValueError("Full query sampling needed in initial timestep!")
+                
+                # pre-allocation
+                self.padded_new_queries = torch.zeros(                                  # (B, N + S^2, 3)
+                    (self.B, self.N + self.support_grid_size**2, 2),
+                    dtype=torch.float32, 
+                    device=self.device
+                )
+                self.resampled_mask = torch.zeros(
+                    (self.B, self.N + self.support_grid_size**2),
+                    dtype=torch.bool, 
+                    device=self.device
+                )
+
+                extra = get_points_on_a_grid(                                       # (B, S^2, 2)
+                    self.support_grid_size, 
+                    (self.H, self.W), 
+                    self.device
+                ).repeat(self.B, 1, 1)                                                                
+                self.padded_new_queries[:, :self.N].copy_(padded_new_queries)
+                self.padded_new_queries[:, self.N:].copy_(extra)
+                
+                resampled_mask_support_grid = torch.ones(
+                    (self.B, self.support_grid_size**2), 
+                    dtype=torch.bool, 
+                    device=self.device
+                )
+                self.resampled_mask[:, :self.N].copy_(resampled_mask)
+                self.resampled_mask[:, self.N:].copy_(resampled_mask_support_grid)
+        else:
+            if self.support_grid_size > 0:    
+                self.padded_new_queries[:, :self.N].copy_(padded_new_queries)
+                
+                resampled_mask_support_grid = torch.zeros(
+                    (self.B, self.support_grid_size**2), 
+                    dtype=torch.bool, 
+                    device=self.device
+                )
+                self.resampled_mask[:, :self.N].copy_(resampled_mask)
+                self.resampled_mask[:, self.N:].copy_(resampled_mask_support_grid)
+
+        # Forward through model
+        if self.support_grid_size > 0:  
+            out = self.model.forward_stream(current_frame_batch, self.padded_new_queries, self.resampled_mask)
+        else:
+            out = self.model.forward_stream(current_frame_batch, padded_new_queries, resampled_mask)
+        
+        pred_trajectory = out["P"][:, :self.N, :]                                   # (B, N, 2)
+        pred_visibility = (out["V_logit"][:, :self.N].sigmoid() >= self.delta_v)    # (B, N)
+        pred_uncertainty = out["U_logit"][:, :self.N].sigmoid()                     # (B, N)
+
+        return pred_trajectory, pred_visibility, pred_uncertainty

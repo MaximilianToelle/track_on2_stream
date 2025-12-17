@@ -1,4 +1,5 @@
 import os
+import time
 
 import torch
 import torchvision
@@ -13,6 +14,7 @@ from .prediction_head import Prediction_Head
 from .reranking import Rerank_Module
 
 from ..utils.coord_utils import indices_to_coords
+
 
 class Track_On2(nn.Module):
     def __init__(self, args, nhead=4):
@@ -57,13 +59,14 @@ class Track_On2(nn.Module):
         nn.init.trunc_normal_(self.t_embedding, std=0.02)
         # === === ===
 
+        self.first_forward = True
+
     def _make_transformer_layer(self, layer_num, nhead=4):
         layers = []
         for _ in range(layer_num):
             layer = MHA_Block(self.D, nhead)
             layers.append(layer)
         return nn.ModuleList(layers)
-
 
     def memory_extension(self, new_memory_size):
         pos_embedding = self.t_embedding.clone()  # (1, self.memory_size + 1, self.embedding_dim)
@@ -78,36 +81,42 @@ class Track_On2(nn.Module):
         self.M = new_memory_size
         
     def multiscale_correlation(self, q, h4, h8, h16, h32):
-        # :args q: (1, N, D)
-        # :args h4: (1, P, D)
-        # :args f8: (1, P // 4, D)
-        # :args f16: (1, P // 16, D)
-        # :args f32: (1, P // 32, D)
+        # :args q: (B, N, D)
+        # :args h4: (B, P, D)
+        # :args f8: (B, P // 4, D)
+        # :args f16: (B, P // 16, D)
+        # :args f32: (B, P // 32, D)
 
-        N = q.shape[1]                        # Number of queries
+        B, N, D = q.shape                     # Number of queries
         _, P, D = h4.shape                    # Number of tokens
 
-        q_normalized = F.normalize(q, p=2, dim=-1)    # (1, N, D)
+        q_norm = F.normalize(q, p=2, dim=-1)    # (B, N, D)
+        
+        h_all = torch.cat([h4, h8, h16, h32], dim=1)           # (B, Total_P, D)
+        h_all_norm = F.normalize(h_all, p=2, dim=-1)           # (B, Total_P, D)
 
-        c4 = torch.einsum("bnd,bpd->bnp",  q_normalized, F.normalize(h4, p=2, dim=-1))    # (1, N, P)
-        c8 = torch.einsum("bnd,bpd->bnp",  q_normalized, F.normalize(h8, p=2, dim=-1))    # (1, N, P // 4)
-        c16 = torch.einsum("bnd,bpd->bnp",  q_normalized, F.normalize(h16, p=2, dim=-1))  # (1, N, P // 16)
-        c32 = torch.einsum("bnd,bpd->bnp",  q_normalized, F.normalize(h32, p=2, dim=-1))  # (1, N, P // 32)
+        # (B, N, D) @ (B, D, Total_P) -> (B, N, Total_P)
+        c_all = torch.bmm(q_norm, h_all_norm.transpose(1, 2))
 
-        c4 = c4.view(N, self.Hf, self.Wf)                      # (N, H4, W4)
-        c8 = c8.view(N, self.Hf // 2, self.Wf // 2)            # (N, H8, W8)
-        c16 = c16.view(N, self.Hf // 4, self.Wf // 4)          # (N, H16, W16)
-        c32 = c32.view(N, self.Hf // 8, self.Wf // 8)          # (N, H32, W32)
+        # Slice the result back into scales
+        idx8 = self.P
+        idx16 = idx8 + self.P // 4
+        idx32 = idx16 + self.P // 16
+        
+        c4 = c_all[:, :, :idx8].view(B * N, 1, self.Hf, self.Wf)                    # (B*N, H4, W4)
+        c8 = c_all[:, :, idx8:idx16].view(B * N, self.Hf // 2, self.Wf // 2)        # (B*N, H8, W8) 
+        c16 = c_all[:, :, idx16:idx32].view(B * N, self.Hf // 4, self.Wf // 4)      # (B*N, H16, W16)
+        c32 = c_all[:, :, idx32:].view(B * N, self.Hf // 8, self.Wf // 8)           # (B*N, H32, W32)
 
-        c4 = c4.unsqueeze(1) # (N, 1, H4, W4)
-        c8 = F.interpolate(c8.unsqueeze(1), size=(self.Hf, self.Wf), mode="bilinear", align_corners=False)   # (N, 1, H4, W4)
-        c16 = F.interpolate(c16.unsqueeze(1), size=(self.Hf, self.Wf), mode="bilinear", align_corners=False) # (N, 1, H4, W4)
-        c32 = F.interpolate(c32.unsqueeze(1), size=(self.Hf, self.Wf), mode="bilinear", align_corners=False) # (N, 1, H4, W4)
+        # Interpolate everything to H4, W4
+        c8 = F.interpolate(c8.unsqueeze(1), size=(self.Hf, self.Wf), mode="bilinear", align_corners=False)       # (B*N, 1, H4, W4)
+        c16 = F.interpolate(c16.unsqueeze(1), size=(self.Hf, self.Wf), mode="bilinear", align_corners=False)     # (B*N, 1, H4, W4)
+        c32 = F.interpolate(c32.unsqueeze(1), size=(self.Hf, self.Wf), mode="bilinear", align_corners=False)     # (B*N, 1, H4, W4)
 
-        c = torch.cat([c4, c8, c16, c32], dim=1)     # (N, 4, H4, W)
-        c = self.ms_corr_proj(c)                     # (N, 1, H4, W)
+        c = torch.cat([c4, c8, c16, c32], dim=1)     # (B*N, 4, H4, W)
+        c = self.ms_corr_proj(c)                     # (B*N, 1, H4, W)
 
-        c = c.view(1, N, self.P)                     # (N, P)
+        c = c.view(B, N, self.P)                     # (B, N, P)
 
         return c
     
@@ -282,11 +291,10 @@ class Track_On2(nn.Module):
 
         return out
     
-
     def forward_online(self, video, queries):
 
         B, T, _, H_in, W_in = video.shape
-        M = self.M
+        M = self.M                                  
         D = self.D
         N = queries.shape[1]                        # Number of queries
         K = self.K
@@ -421,7 +429,327 @@ class Track_On2(nn.Module):
 
         return out
 
+    def forward_stream(self, current_frame_batch, padded_new_queries, resampled_mask):
+        """
+        Provides point prediction, visibility and uncertainty for current_frame_batch. 
+        
+        :param current_frame_batch: [B, C, H_in, W_in]
+        :param padded_new_queries: [B, N, 2], where each query is (x, y) in pixel coordinates
+        :param resampled_mask: [B, N] showing which queries to use from padded_new_queries  
+        """
+    
+        if self.first_forward: 
+            self.first_forward = False
 
+            self.B, _, self.H_in, self.W_in = current_frame_batch.shape
+            self.N = padded_new_queries.shape[1]
+            self.device = current_frame_batch.device
+
+            # === Query initialization === 
+            self.query_init = torch.zeros(self.B, self.N, self.D, device=self.device)           
+
+            # === Memory initialization ===
+            self.point_memory = torch.zeros(self.B, self.N, self.M, self.D, device=self.device)                       
+            self.temporal_mask = torch.ones(self.B, self.N, self.M, device=self.device, dtype=torch.bool)          # True if masked, (B, N, M)
+            # === === ===
+
+            # === Pre-allocation ====
+            self.qkv_buffer = torch.empty((self.B * self.N, self.M + 1, self.D), device=self.device)
+            self.mask_buffer = torch.zeros((self.B * self.N, self.M + 1), dtype=torch.bool, device=self.device)
+
+            # === Constants === 
+            self.register_buffer('denominator', torch.tensor([self.W_in, self.H_in], device=self.device))
+            self.register_buffer('new_mask_col', torch.zeros(self.B, self.N, device=self.device, dtype=torch.bool))
+                
+        current_frame_batch = current_frame_batch.to(torch.float32) / 255.0      # to [0, 1]
+        current_frame_batch = F.interpolate(
+            current_frame_batch, 
+            size=self.input_size, 
+            mode="bilinear", 
+            align_corners=False
+        )
+        # === === ===
+
+        # === Visual Backbone Feedforward ===
+        f4, f8, f16, f32 = self.backbone(current_frame_batch.unsqueeze(1))
+        f_fused = self.fpn(f4, f8, f16, f32).squeeze(1)                    # (B, P, D)
+        f4 = f4.squeeze(1)
+        f8 = f8.squeeze(1)
+        f16 = f16.squeeze(1)
+        f32 = f32.squeeze(1)
+
+        # === Process new queries based on the resampled_mask === 
+        # NOTE: Preventing boolean indexing through multiplication and logical_or_
+        resampled_multiplier = resampled_mask.unsqueeze(-1).float()
+
+        # Reset memory and temporal mask
+        # Set point_memory for resampled indices to zero 
+        self.point_memory.mul_(1 - resampled_multiplier.unsqueeze(-1))
+        # Set temporal_mask for resampled indices to True 
+        self.temporal_mask.logical_or_(resampled_mask.unsqueeze(-1))
+    
+        # Prepare grid sample points - from queries [B, N, 2] -> [B, N, 1, 2]
+        # Note: grid_sample expects (x, y) in [-1, 1]
+        pts = (padded_new_queries / self.denominator * 2 - 1)
+        pts = pts.unsqueeze(2)
+        
+        # Update query_init with the resampled points
+        # f_fused: (B, P, D) -> (B, D, Hf, Wf) for grid_sampling
+        f_fused_sampling = f_fused.view(self.B, self.Hf, self.Wf, self.D).permute(0, 3, 1, 2)
+        new_feats = F.grid_sample(
+            f_fused_sampling, 
+            pts, 
+            mode='bilinear', 
+            align_corners=False
+        ).squeeze(-1).permute(0, 2, 1)                                    # [B, N, D]
+        # Replace old queries with features of newly resampled queries
+        self.query_init.copy_((self.query_init * (1 - resampled_multiplier)) + (new_feats * resampled_multiplier))
+        # === === ===
+
+        # init queries 
+        q_t = self.query_init.clone()                   # (B, N, D)
+
+        # === Vectorized Transformer Layers ===
+        for i in range(self.decoder_layer_num):
+            q_t = self.feature_attention[i](q_t, f_fused, f_fused)         # (B, N, D)
+            q_t = self.query_attention[i](q_t, q_t, q_t)
+            
+            # Memory Attention - Flatten over B and N for vectorized processing
+            q_t_flat = q_t.view(self.B * self.N, 1, self.D)
+            memory_flat = self.point_memory.view(self.B * self.N, self.M, self.D)
+            mask_flat = self.temporal_mask.view(self.B * self.N, self.M)
+            self.qkv_buffer[:, :self.M, :].copy_(memory_flat)
+            self.qkv_buffer[:, self.M:, :].copy_(q_t_flat)
+            self.mask_buffer[:, :self.M].copy_(mask_flat)
+            
+            qkv_input = self.qkv_buffer + self.t_embedding
+            qkv_output = self.memory_attention[i](
+                qkv_input,
+                qkv_input,
+                self.qkv_buffer,
+                self.mask_buffer
+            )
+
+            # Extract updated query and reshape back to (B, N, D)
+            q_t_flat = qkv_output[:, -1].unsqueeze(1)      # (B*N, 1, D)
+            q_t = q_t_flat.view(self.B, self.N, self.D)
+
+        q_t = self.projection1(q_t)                 # (B, N, D)
+
+        # === Vectorized Reranking ===
+        c1 = self.multiscale_correlation(q_t, f4, f8, f16, f32)     # (B, N, P)
+        q_t, _, _, _ = self.reranking_head(q_t, f4, f8, f16, f32, c1) 
+        q_t = self.projection2(q_t)                                 # (B, N, D)
+        
+        c2 = self.multiscale_correlation(q_t, f4, f8, f16, f32)     # (B, N, P)
+        
+        p_patch = indices_to_coords(
+            torch.argmax(c2.detach(), dim=-1).unsqueeze(1),
+            self.input_size, 
+            self.stride
+        ).squeeze(1)
+
+        # === Soft-Argmax (GPU-resident, no sync) ===
+        # Convert correlation scores to probability distribution
+        # c2_probs = torch.softmax(c2, dim=-1)  # (B, N, P)
+        
+        # # # Precompute patch coordinate grid on first call
+        # if not hasattr(self, '_patch_coords_cache'):
+        #     Hf, Wf = self.Hf, self.Wf
+        #     y_coords = torch.arange(Hf, device=c2.device, dtype=c2.dtype) * self.stride + 0.5 * self.stride
+        #     x_coords = torch.arange(Wf, device=c2.device, dtype=c2.dtype) * self.stride + 0.5 * self.stride
+        #     yy, xx = torch.meshgrid(y_coords, x_coords, indexing='ij')
+        #     patch_coords = torch.stack([xx, yy], dim=-1).view(-1, 2)  # (P, 2)
+        #     self.register_buffer('_patch_coords_cache', patch_coords, persistent=False)
+        
+        # patch_coords = self._patch_coords_cache
+        
+        # # # Weighted average of patch coordinates: (B, N, P) × (P, 2) → (B, N, 2)
+        # p_patch = torch.einsum('bnp,p...->bn...', c2_probs, patch_coords)  # (B, N, 2)      
+
+        # === Vectorized Prediction Head ===
+        o, v_logit, u_logit = self.prediction_head(q_t, f4, f8, f16, f32, p_patch)      # (Layers, B, N, 2), (B, N), (B, N)
+        
+        # Final Position Calculation
+        P = p_patch + o[-1]             # (B, N, 2)
+
+        # memory update - shift memory to the left (discard oldest)
+        self.point_memory[:, :, :-1].copy_(self.point_memory[:, :, 1:].clone())
+        self.point_memory[:, :, -1].copy_(q_t)     
+
+        # shift mask 
+        self.temporal_mask[:, :, :-1].copy_(self.temporal_mask[:, :, 1:].clone())
+        self.temporal_mask[:, :, -1].copy_(self.new_mask_col)
+
+        # === Final Output Scaling ===
+        P[..., 0] = (P[..., 0] / self.W) * self.W_in
+        P[..., 1] = (P[..., 1] / self.H) * self.H_in
+        
+        out = {"P": P, "V_logit": v_logit, "U_logit": u_logit}
+        
+        return out
+
+
+    def old_forward_stream(self, current_frame_batch, query_updates, resampled_indices):
+        """
+        Provides point prediction, visibility and uncertainty for current_frame_batch. 
+        
+        :param current_frame_batch: [B, C, H_in, W_in]
+        :param query_updates: None or List of B tensors of individual shape (N_B, 2), where each query to update is (x, y) in pixel coordinates
+        :param resampled_indices: None or List of B tensors of individual shape (N_B) providing the indices of query_updates
+        """
+        
+        start = time.time()
+
+        if self.first_forward: 
+            self.B, _, self.H_in, self.W_in = current_frame_batch.shape
+            self.N = query_updates[0].shape[0]
+            self.device = current_frame_batch.device
+
+            # === Query ínitialization === 
+            self.query_init = torch.zeros(self.B, self.N, self.D, device=self.device)           
+
+            # === Memory initialization ===
+            self.point_memory = torch.zeros(self.B, self.N, self.M, self.D, device=self.device)                       
+            self.temporal_mask = torch.ones(self.B, self.N, self.M, device=self.device, dtype=torch.bool)          # True if masked, (B, N, M)
+            # === === ===
+                
+            self.first_forward = False
+        
+        current_frame_batch = current_frame_batch.to(torch.float32) / 255.0      # to [0, 1]
+        current_frame_batch = F.interpolate(
+            current_frame_batch, 
+            size=self.input_size, 
+            mode="bilinear", 
+            align_corners=False
+        )
+        # === === ===
+
+        # === Output initialization ===
+        V_logit = torch.zeros(self.B, self.N, device=self.device)                   # (B, N)
+        U_logit = torch.zeros(self.B, self.N, device=self.device)                   # (B, N)
+        P = torch.zeros(self.B, self.N, 2, device=self.device)                      # (B, N, 2)
+        # === === ===
+        for b in range(self.B):
+            
+            frame = current_frame_batch[b].unsqueeze(0).unsqueeze(0)        # [B, ]
+
+            # === Visual Backbone Feedforward ===
+            # (1, 1, P, D), (1, 1, P // 4, D), (1, 1, P // 16, D), (1, 1, P // 64, D)
+            f4_t, f8_t, f16_t, f32_t = self.backbone(frame)     
+            f_fused_t = self.fpn(f4_t, f8_t, f16_t, f32_t)      # (1, 1, P, D)
+            
+            f4_t = f4_t.squeeze(0)                                 # (1, P, D)
+            f8_t = f8_t.squeeze(0)                                 # (1, P // 4, D)
+            f16_t = f16_t.squeeze(0)                               # (1, P // 16, D)
+            f32_t = f32_t.squeeze(0)                               # (1, P // 64, D)
+            f_fused_t = f_fused_t.squeeze(0)                       # (1, P, D)
+            # === === ===
+
+            if query_updates is not None:
+                # some or all batch views have resampled queries
+                if len(query_updates[b]) == 0 or len(resampled_indices[b]) == 0:
+                    # batch view does not have any resampled queries to process
+                    continue
+
+                query_updates_b = query_updates[b]
+                resampled_indices_b = resampled_indices[b]
+
+                # === Reset memory and temporal mask based on resampled indices ===
+                self.point_memory[b, resampled_indices_b, :, :] = 0.0
+                self.temporal_mask[b, resampled_indices_b, :] = 1.0 
+                # === === ===
+
+                # === Scaling ====
+                # scale to [0, 1] range
+                query_updates_b[..., 1] = (query_updates_b[..., 1] / self.H_in)
+                query_updates_b[..., 0] = (query_updates_b[..., 0] / self.W_in)
+                
+                # Leverage f_fused_t to get features for newly sampled queries  
+                query_coords_b_norm = query_updates_b.clone()                # (N, 2)
+                query_coords_b_norm  = query_coords_b_norm * 2 - 1           # (N, 2), in range [-1, 1]
+                pts = query_coords_b_norm.unsqueeze(0).unsqueeze(2)                     # (1, N, 1, 2)
+            
+                f_b_t = f_fused_t.view(1, self.Hf, self.Wf, self.D)                     # (1, H4, W4, D)
+                f_b_t = f_b_t.permute(0, 3, 1, 2)                                       # (1, D, H4, W4)
+
+                # Sample Points
+                centers = F.grid_sample(
+                    f_b_t, 
+                    pts, 
+                    mode='bilinear', 
+                    padding_mode='border', 
+                    align_corners=False
+                )   # (1, D, N_now_t, 1)
+                centers = centers.squeeze(-1).squeeze(0).permute(1, 0)            # (N, D)
+                self.query_init[b, resampled_indices_b] = centers                 # (N, D)
+            q_t = self.query_init[b].clone().unsqueeze(0)                         # (1, N, D)
+            # === === ===
+
+            memory_mask_t = self.temporal_mask[b]
+            memory = self.point_memory[b]
+            # === Query Decoder ===
+            for i in range(self.decoder_layer_num):
+                # === Attention to frame features ===
+                q_t = self.feature_attention[i](q_t, 
+                                            f_fused_t, 
+                                            f_fused_t)         # (1, N, D)
+                # === === ===
+
+                # === Attention to other queries ===
+                q_t = self.query_attention[i](q_t, q_t, q_t)        # (1, N, D)
+                # === === ===
+
+                # === Attention to memory ===
+                q_t = q_t.view(self.N, 1, self.D)                                      # (N, 1, D)
+
+                qkv = torch.cat([memory, q_t], dim=1)                                                         # (N, M + 1, D)
+                mask = torch.cat([memory_mask_t, torch.zeros(self.N, 1, device=self.device).bool()], dim=1)   # (N, M + 1)
+                qkv = self.memory_attention[i](qkv + self.t_embedding,
+                                                qkv + self.t_embedding,
+                                                qkv,
+                                                mask)                           # (N, M + 1, D)
+                q_t = qkv[:, -1].unsqueeze(0)                                   # (1, N, D)
+                memory = qkv[:, :-1]                                            # (N, M, D)
+                # === === ===
+
+            q_t = self.projection1(q_t)
+            # === === ===
+
+            # === Re-ranking ===
+            c1 = self.multiscale_correlation(q_t, f4_t, f8_t, f16_t, f32_t)                             # (1, N, P)
+            q_t, _, _, _ = self.reranking_head(q_t, f4_t, f8_t, f16_t, f32_t, c1)  # (1, N, D), (1, N, K, 2), (1, N, K), (1, N, K)
+            q_t = self.projection2(q_t)                                                            # (1, N, D)
+
+            c2 = self.multiscale_correlation(q_t, f4_t, f8_t, f16_t, f32_t)                                        # (1, N, P)
+            p_patch = indices_to_coords(torch.argmax(c2.detach(), dim=-1).unsqueeze(1), self.input_size, self.stride)   # (1, 1, N, 2), in range [H, W]
+            p_patch = p_patch.squeeze(1)                                                                               # (1, N, 2)
+            # === === ===
+
+            # === Prediction Head ===
+            o, v_logit, u_logit = self.prediction_head(q_t, f4_t, f8_t, f16_t, f32_t, p_patch)        # (layer_num, N, 2), (N), (N)
+            # === === ===
+
+            P[b] = p_patch[0] + o[-1]                   # (1, N, 2)
+            V_logit[b] = v_logit.float()                # (N)
+            U_logit[b] = u_logit.float()                # (N)
+
+            # === Updates ===
+            # Update Memory
+            point_memory_slice = q_t.clone().view(self.N, 1, self.D)                                           # (N, 1, D)
+            self.point_memory[b] = torch.cat([self.point_memory[b, :, 1:], point_memory_slice], dim=1)         # (N, M, D)
+
+            # Update Temporal Mask
+            self.temporal_mask[b] = torch.cat([self.temporal_mask[b, :, 1:], torch.zeros((self.N, 1), device=self.device)], dim=1)   # (N, M)
+
+        # === Output ===
+        P[..., 0] = (P[..., 0] / self.W) * self.W_in
+        P[..., 1] = (P[..., 1] / self.H) * self.H_in
+        out = {"P": P, "V_logit": V_logit, "U_logit": U_logit}
+
+        print(f"Model forward() took {time.time() - start}")
+
+        return out
 
     def forward_frame(self, q_init, temporal_mask, point_memory, frame):
         # :args q_init: (N, D)
