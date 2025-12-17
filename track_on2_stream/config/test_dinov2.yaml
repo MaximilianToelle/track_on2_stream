@@ -13,4 +13,4 @@ track_on_dinov2:
     M_i: 72
     delta_v: 0.8
     grad_checkpoint: True
-  num_queries: 100
+  num_queries: 50

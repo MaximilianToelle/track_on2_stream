@@ -1,13 +1,16 @@
 track_on_dinov3:
-  input_size: [384, 512]
-  M: 24
-  D: 256
-  K: 16
-  decoder_layer_num: 3
-  predicton_head_layer_num: 3
-  rerank_layer_num: 3 
-  vit_backbone: "dinov3_s_plus"
-  vit_upsample_factor: 1.143
-  M_i: 72
-  delta_v: 0.8
-  grad_checkpoint: True
+  checkpoint: "/home/max/Projects/online_gaussian_splatting/dependencies/track_on2_stream/checkpoints/trackon2_dinov3_checkpoint.pt"
+  model_args:
+    input_size: [384, 512]
+    M: 24
+    D: 256
+    K: 16
+    decoder_layer_num: 3
+    predicton_head_layer_num: 3
+    rerank_layer_num: 3 
+    vit_backbone: "dinov3_s_plus"
+    vit_upsample_factor: 1.143
+    M_i: 72
+    delta_v: 0.8
+    grad_checkpoint: True
+  num_queries: 50
