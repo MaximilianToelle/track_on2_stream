@@ -13,4 +13,6 @@ track_on_dinov3:
     M_i: 72
     delta_v: 0.8
     grad_checkpoint: True
-  num_queries: 50
+  num_queries: 100
+  resample_after_num_invisible_timesteps: 5
+  num_timesteps_until_visible: 2    # after invisibility or resampling

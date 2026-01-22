@@ -67,7 +67,7 @@ class QueryManager:
         num_queries_per_view,
         extrinsics, 
         intrinsics,
-        resample_after_num_invisible_t = 1,
+        resample_after_num_invisible_t = 4,
         resample_uncertainty_threshold = 0.1,
     ):  
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -99,9 +99,8 @@ class QueryManager:
         new_depth_images,                                   # [B, H, W]
         new_depth_confidences,                              # [B, H, W]
         last_prediction = None,                             # [B, N, 2]
-        last_visibility = None,                             # [B, N]
-        last_uncertainty = None,                            # [B, N]
         last_post_processed_invisibility_mask = None,       # [B, N]
+        last_uncertainty = None,                            # [B, N]
     ):     
         """
         Samples all queries during initial timestep. Otherwise, checks which tracked points have been invisible for  
@@ -113,24 +112,26 @@ class QueryManager:
         if not self.initialized: 
             # NOTE: working with mask instead of indices to prevent different number of entries per batch element!
             self.resample_mask.fill_(True)
+            last_visibility = None
             self.initialized = True
         else: 
             # update visibility
-            last_invisible_mask = (~last_visibility) | last_post_processed_invisibility_mask
             self.invisibility_history[1:].copy_(self.invisibility_history[:-1].clone())
-            self.invisibility_history[0].copy_(last_invisible_mask)
+            self.invisibility_history[0].copy_(last_post_processed_invisibility_mask)
 
             # resample if invisible throughout history or too uncertain
             too_uncertain = last_uncertainty > self.resample_uncertainty_threshold                # [B, N]
             self.resample_mask.copy_(self.invisibility_history.all(dim=0) | too_uncertain)        # [B, N]
-        
+            # self.resample_mask.fill_(False)
+            last_visibility = ~last_post_processed_invisibility_mask
+
         self.sample_new_queries(         
             new_rgbs,                          
             new_segmentations,             
             new_depth_images,                 
             new_depth_confidences,            
             last_prediction,
-            last_visibility
+            last_visibility,
         )
 
         return self.padded_queries, self.resample_mask
@@ -144,7 +145,7 @@ class QueryManager:
         last_prediction = None,         # [B, N, 2] with per-point x,y img coordinates
         last_visibility = None,         # [B, N]
         depth_confidence_threshold = 30,
-        min_pixel_dist = 4,             # 2D convolution kernel radius
+        min_pixel_dist = 2,             # 2D convolution kernel radius
         voxel_size = 0.05,                                  
     ): 
         """
@@ -187,6 +188,9 @@ class QueryManager:
         # Potential candidates: foreground, no neighbors, and good depth confidence
         candidate_mask = (neighbor_count == 0) & (depth_confidences <= depth_confidence_threshold)
 
+        # TODO: Project candidates into 3D and filter wrt to overlapping view coordinates
+        # TODO: Possibly we also need to change the number of queries per view to be a maximum value (smaller surfaces should not have as many queries as larger surfaces)
+
         # vectorized sampling via random priority
         # NOTE: since we can't easily torch.randperm with different counts per batch,
         # we assign a random value to every pixel and take the topk.
@@ -214,5 +218,3 @@ class QueryManager:
         src_mask = max_resample_indices < num_resample.unsqueeze(1)
         
         self.padded_queries[destination_indices] = sampled_coords[src_mask]
-
-        # TODO: Project into 3D and filter wrt to overlapping view coordinates

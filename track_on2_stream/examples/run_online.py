@@ -12,6 +12,7 @@ class TrackOn2Stream:
         model_args, 
         num_camera_views, 
         num_queries_per_view,
+        resample_after_num_invisible_timesteps,
         extrinsics,
         intrinsics,
         checkpoint_path=None,
@@ -30,6 +31,7 @@ class TrackOn2Stream:
             num_queries_per_view,
             extrinsics, 
             intrinsics,
+            resample_after_num_invisible_t=resample_after_num_invisible_timesteps,
         )
 
         self.last_prediction = None
@@ -52,9 +54,8 @@ class TrackOn2Stream:
             new_depth_images,
             new_depth_confidences,
             self.last_prediction,   # assumption: points do not move far in one step
-            self.last_visibility, 
+            last_post_processed_non_visibility_mask, 
             self.last_uncertainty,
-            last_post_processed_non_visibility_mask
         )
 
         point_prediction, visibility, uncertainty = self.predictor(
@@ -63,8 +64,8 @@ class TrackOn2Stream:
             resampled_mask
         )
 
+        # NOTE: Visibility gets post-processed externally  
         self.last_prediction = point_prediction
-        self.last_visibility = visibility
         self.last_uncertainty = uncertainty
 
         return point_prediction, visibility, uncertainty, resampled_mask

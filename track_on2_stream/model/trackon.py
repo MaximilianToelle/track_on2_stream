@@ -521,6 +521,7 @@ class Track_On2(nn.Module):
             self.qkv_buffer[:, :self.M, :].copy_(memory_flat)
             self.qkv_buffer[:, self.M:, :].copy_(q_t_flat)
             self.mask_buffer[:, :self.M].copy_(mask_flat)
+            self.mask_buffer[:, self.M:].fill_(False)
             
             qkv_input = self.qkv_buffer + self.t_embedding
             qkv_output = self.memory_attention[i](

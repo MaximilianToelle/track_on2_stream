@@ -116,7 +116,8 @@ class StreamPredictor(Predictor):
         
         self.first_forward = True
 
-    @torch.no_grad()
+    @torch.inference_mode()
+    # @torch.autocast(device_type="cuda", dtype=torch.float16)
     def forward(self, current_frame_batch, padded_new_queries, resampled_mask):
         """
         current_frame_batch: Tensor of shape (B, 3, H, W)
