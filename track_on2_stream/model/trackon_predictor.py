@@ -1,7 +1,6 @@
 import torch
 from .trackon import Track_On2
 from ..evaluation.evaluator import get_points_on_a_grid  # adjust import if needed
-from ..examples.query_manager import QueryManager
 from collections import OrderedDict
 
 ALLOWED_MISSING_PREFIXES = (
@@ -117,18 +116,18 @@ class StreamPredictor(Predictor):
         self.first_forward = True
 
     @torch.inference_mode()
-    # @torch.autocast(device_type="cuda", dtype=torch.float16)
-    def forward(self, current_frame_batch, padded_new_queries, resampled_mask):
+    @torch.autocast(device_type="cuda", dtype=torch.float16)
+    def forward(self, current_frame_batch, queries, resampled_mask):
         """
         current_frame_batch: Tensor of shape (B, 3, H, W)
-        padded_new_queries: [B, N, 2], where each query is (x, y) in pixel coordinates
-        resampled_mask: [B, N] showing which queries to use from padded_new_queries  
+        queries: [B, N, 2], where each query has uv pixel coordinates
+        resampled_mask: [B, N] showing which queries to use
         """
 
         if self.first_forward:
             self.first_forward = False
 
-            self.N = padded_new_queries.shape[1]
+            self.N = queries.shape[1]
 
             if self.support_grid_size > 0:
                 self.B, _, self.H, self.W = current_frame_batch.shape
@@ -138,7 +137,7 @@ class StreamPredictor(Predictor):
                     raise ValueError("Full query sampling needed in initial timestep!")
                 
                 # pre-allocation
-                self.padded_new_queries = torch.zeros(                                  # (B, N + S^2, 3)
+                self.queries = torch.zeros(                                  # (B, N + S^2, 3)
                     (self.B, self.N + self.support_grid_size**2, 2),
                     dtype=torch.float32, 
                     device=self.device
@@ -154,8 +153,8 @@ class StreamPredictor(Predictor):
                     (self.H, self.W), 
                     self.device
                 ).repeat(self.B, 1, 1)                                                                
-                self.padded_new_queries[:, :self.N].copy_(padded_new_queries)
-                self.padded_new_queries[:, self.N:].copy_(extra)
+                self.queries[:, :self.N].copy_(queries)
+                self.queries[:, self.N:].copy_(extra)
                 
                 resampled_mask_support_grid = torch.ones(
                     (self.B, self.support_grid_size**2), 
@@ -166,7 +165,7 @@ class StreamPredictor(Predictor):
                 self.resampled_mask[:, self.N:].copy_(resampled_mask_support_grid)
         else:
             if self.support_grid_size > 0:    
-                self.padded_new_queries[:, :self.N].copy_(padded_new_queries)
+                self.queries[:, :self.N].copy_(queries)
                 
                 resampled_mask_support_grid = torch.zeros(
                     (self.B, self.support_grid_size**2), 
@@ -178,9 +177,9 @@ class StreamPredictor(Predictor):
 
         # Forward through model
         if self.support_grid_size > 0:  
-            out = self.model.forward_stream(current_frame_batch, self.padded_new_queries, self.resampled_mask)
+            out = self.model.forward_stream(current_frame_batch, self.queries, self.resampled_mask)
         else:
-            out = self.model.forward_stream(current_frame_batch, padded_new_queries, resampled_mask)
+            out = self.model.forward_stream(current_frame_batch, queries, resampled_mask)
         
         pred_trajectory = out["P"][:, :self.N, :]                                   # (B, N, 2)
         pred_visibility = (out["V_logit"][:, :self.N].sigmoid() >= self.delta_v)    # (B, N)

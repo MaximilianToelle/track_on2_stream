@@ -13,6 +13,10 @@ track_on_dinov3:
     M_i: 72
     delta_v: 0.8
     grad_checkpoint: True
-  num_queries: 100
-  resample_after_num_invisible_timesteps: 5
-  num_timesteps_until_visible: 2    # after invisibility or resampling
+  num_tracked_points: 1                          # total number of tracked points per object
+  voxel_size: 0.01                               # size of 3D voxels for downsampling during querying  
+  resample_after_num_invisible_timesteps: 5      # global 3d point gets resampled if it is invisible from all cameras (lost tracking)
+  view_point_tracking_reset_threshold: 3         # tracking of view-projected point gets reset (e.g. model is too uncertain, global point gets projected into view and used as new query)
+  resample_uncertainty_threshold: 0.1            # upper limit of model uncertainty - if above, point gets resampled 
+  num_timesteps_until_visible: 2                 # after invisibility or resampling
+  

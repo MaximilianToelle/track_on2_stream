@@ -60,6 +60,7 @@ class Track_On2(nn.Module):
         # === === ===
 
         self.first_forward = True
+        self.first_query = True
 
     def _make_transformer_layer(self, layer_num, nhead=4):
         layers = []
@@ -429,20 +430,20 @@ class Track_On2(nn.Module):
 
         return out
 
-    def forward_stream(self, current_frame_batch, padded_new_queries, resampled_mask):
+    def forward_stream(self, current_frame_batch, queries, resampled_mask):
         """
         Provides point prediction, visibility and uncertainty for current_frame_batch. 
         
         :param current_frame_batch: [B, C, H_in, W_in]
-        :param padded_new_queries: [B, N, 2], where each query is (x, y) in pixel coordinates
-        :param resampled_mask: [B, N] showing which queries to use from padded_new_queries  
+        :param queries: [B, N, 2], where each query has uv pixel coordinates
+        :param resampled_mask: [B, N] showing which queries to use for reset 
         """
     
         if self.first_forward: 
             self.first_forward = False
 
             self.B, _, self.H_in, self.W_in = current_frame_batch.shape
-            self.N = padded_new_queries.shape[1]
+            self.N = queries.shape[1]
             self.device = current_frame_batch.device
 
             # === Query initialization === 
@@ -490,7 +491,7 @@ class Track_On2(nn.Module):
     
         # Prepare grid sample points - from queries [B, N, 2] -> [B, N, 1, 2]
         # Note: grid_sample expects (x, y) in [-1, 1]
-        pts = (padded_new_queries / self.denominator * 2 - 1)
+        pts = (queries / self.denominator * 2 - 1)
         pts = pts.unsqueeze(2)
         
         # Update query_init with the resampled points
@@ -500,8 +501,10 @@ class Track_On2(nn.Module):
             f_fused_sampling, 
             pts, 
             mode='bilinear', 
+            padding_mode='zeros',       # zero features for pts outside feature pyramid
             align_corners=False
         ).squeeze(-1).permute(0, 2, 1)                                    # [B, N, D]
+        
         # Replace old queries with features of newly resampled queries
         self.query_init.copy_((self.query_init * (1 - resampled_multiplier)) + (new_feats * resampled_multiplier))
         # === === ===
